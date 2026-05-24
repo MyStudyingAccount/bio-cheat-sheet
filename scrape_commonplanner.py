@@ -64,11 +64,15 @@ def classify_link(url: str) -> str:
 
     if path.endswith(".pdf") or _url_has_pdf_query(url):
         return "pdf"
-    if host.endswith("youtube.com") or host.endswith("youtu.be"):
+    if _host_matches_domain(host, "youtube.com") or _host_matches_domain(host, "youtu.be"):
         return "youtube"
-    if host.endswith("commonplanner.com"):
+    if _host_matches_domain(host, "commonplanner.com"):
         return "commonplanner"
     return "external"
+
+
+def _host_matches_domain(host: str, domain: str) -> bool:
+    return host == domain or host.endswith(f".{domain}")
 
 
 def _normalize_link(link: str, page_url: str) -> str | None:

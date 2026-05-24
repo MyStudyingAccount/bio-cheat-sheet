@@ -44,6 +44,10 @@ class LinkExtractionTests(unittest.TestCase):
         self.assertEqual(classified["https://youtu.be/xyz"], "youtube")
         self.assertEqual(classified["https://example.com/homework"], "external")
 
+    def test_classify_link_rejects_suffix_lookalikes(self):
+        self.assertEqual(classify_link("https://notyoutube.com/watch?v=abc"), "external")
+        self.assertEqual(classify_link("https://evilcommonplanner.com/page"), "external")
+
 
 if __name__ == "__main__":
     unittest.main()
