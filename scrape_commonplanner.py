@@ -208,6 +208,43 @@ def extract_links_from_card_stack(card_stack_document: dict, page_url: str) -> l
     return sorted(set(links))
 
 
+def reconstruct_html_from_card_stack(card_stack_document: dict, page_url: str) -> str:
+    data = card_stack_document.get("data", {})
+    cards = data.get("attributes", {}).get("cards", [])
+
+    parts: list[str] = []
+    parts.append("<html>")
+    parts.append("<head><meta charset=\"utf-8\"><title>" + html_module.escape(page_url) + "</title></head>")
+    parts.append("<body>")
+    parts.append(f"<h1>Source: {html_module.escape(page_url)}</h1>")
+
+    for card in cards:
+        attributes = card.get("attributes", {})
+        card_title = attributes.get("title")
+        if card_title:
+            parts.append(f"<h2>{html_module.escape(str(card_title))}</h2>")
+
+        value = attributes.get("value") or ""
+        # value is expected to be an HTML fragment already
+        parts.append(value)
+
+        attachments = attributes.get("attachments") or []
+        if attachments:
+            parts.append("<ul>")
+            for att in attachments:
+                att_url = att.get("url")
+                att_title = att.get("title") or att_url or "attachment"
+                if att_url:
+                    parts.append(
+                        f"<li><a href=\"{html_module.escape(att_url)}\">{html_module.escape(str(att_title))}</a></li>"
+                    )
+            parts.append("</ul>")
+
+    parts.append("</body>")
+    parts.append("</html>")
+    return "\n".join(parts)
+
+
 def safe_name_from_url(url: str, fallback: str) -> str:
     parsed = urlparse(url)
     name = Path(parsed.path).name or fallback
@@ -286,6 +323,11 @@ def scrape(
                 {"url": link, "type": resolve_link_type(link, timeout=timeout, user_agent=user_agent)}
                 for link in page_links
             ]
+            # Reconstruct and save a minimal HTML snapshot from the card stack JSON
+            reconstructed_html = reconstruct_html_from_card_stack(card_stack_document, page_url)
+            local_html = page_dir / f"{target_date.isoformat()}.html"
+            local_html.write_text(reconstructed_html, encoding="utf-8")
+            saved_html_path = str(local_html)
             page_error = ""
         except Exception as exc:  # noqa: BLE001
             classified_links = []
@@ -308,6 +350,7 @@ def scrape(
                 "date": target_date.isoformat(),
                 "page_url": page_url,
                 "saved_json": str(local_json),
+                "saved_html": saved_html_path if 'saved_html_path' in locals() else "",
                 "link_count": len(classified_links),
                 "error": page_error,
                 "links": classified_links,

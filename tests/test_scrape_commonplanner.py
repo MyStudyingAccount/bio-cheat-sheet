@@ -262,6 +262,70 @@ class ApiScrapeTests(unittest.TestCase):
             self.assertEqual(link_types["https://www.youtube.com/watch?v=abc123"], "youtube")
             self.assertTrue((output_dir / "calendar_pages" / "2026-05-18.json").exists())
 
+        def test_scrape_writes_reconstructed_html(self):
+            class_website_document = {
+                "included": [
+                    {"type": "course", "attributes": {"calendar": {"dates": [{"id": "2026-05-18", "attributes": {"cardStackId": "stack-1"}}]}}}
+                ]
+            }
+            card_stack_document = {
+                "data": {
+                    "attributes": {
+                        "cards": [
+                            {
+                                "attributes": {
+                                    "value": '<p><a href="https://www.youtube.com/watch?v=abc123">Lecture</a></p>',
+                                    "attachments": [
+                                        {"url": "https://cdn.filestackcontent.com/l0MyQIWSZ22902qfk8Tw", "title": "Handout.pdf"}
+                                    ],
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+
+            def fake_fetch_url(url, timeout, user_agent):
+                if url == "https://www.commonplanner.com/api/v4/class_websites_by_slug/yang2526":
+                    return json.dumps(class_website_document).encode("utf-8")
+                if url == "https://www.commonplanner.com/api/v4/card_stacks/stack-1":
+                    return json.dumps(card_stack_document).encode("utf-8")
+                raise AssertionError(f"Unexpected URL: {url}")
+
+            pdf_response = Mock()
+            pdf_response.headers.get_content_type.return_value = "application/pdf"
+            pdf_response.headers.get.return_value = ""
+            pdf_response.read.return_value = b""
+
+            def fake_urlopen(req, timeout):
+                url = getattr(req, "full_url", str(req))
+                if url == "https://cdn.filestackcontent.com/l0MyQIWSZ22902qfk8Tw":
+                    return pdf_response
+                raise AssertionError(f"Unexpected probe URL: {url}")
+
+            with TemporaryDirectory() as tmp_dir:
+                output_dir = Path(tmp_dir)
+                with patch("scrape_commonplanner.fetch_url", side_effect=fake_fetch_url), patch(
+                    "scrape_commonplanner.urlopen", side_effect=fake_urlopen
+                ):
+                    summary = scrape(
+                        site_path="yang2526",
+                        start_date=date(2026, 5, 18),
+                        end_date=date(2026, 5, 18),
+                        perspective="week",
+                        output_dir=output_dir,
+                        timeout=30,
+                        delay_seconds=0,
+                        skip_download_pdfs=True,
+                        user_agent="test-agent",
+                    )
+
+                html_file = output_dir / "calendar_pages" / "2026-05-18.html"
+                self.assertTrue(html_file.exists())
+                content = html_file.read_text(encoding="utf-8")
+                self.assertIn("https://cdn.filestackcontent.com/l0MyQIWSZ22902qfk8Tw", content)
+                self.assertIn("https://www.youtube.com/watch?v=abc123", content)
+
 
 if __name__ == "__main__":
     unittest.main()
