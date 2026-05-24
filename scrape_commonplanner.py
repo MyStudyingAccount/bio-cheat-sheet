@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html as html_module
 import json
 import re
 import time
@@ -16,6 +17,7 @@ from urllib.parse import parse_qs, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 BASE_URL = "https://www.commonplanner.com"
+API_ROOT = f"{BASE_URL}/api/v4"
 URL_PATTERN = re.compile(r"https?://[^\s\"'<>]+")
 
 
@@ -30,6 +32,9 @@ class LinkExtractor(HTMLParser):
             self.links.append(attr_map["href"])
         if tag in {"iframe", "video", "source", "embed"} and attr_map.get("src"):
             self.links.append(attr_map["src"])
+        for attr_name in ("data-href", "data-url", "data-src"):
+            if attr_map.get(attr_name):
+                self.links.append(attr_map[attr_name])
 
 
 def parse_date(raw_date: str) -> date:
@@ -46,6 +51,10 @@ def generate_week_dates(start_date: date, end_date: date) -> list[date]:
         output.append(current)
         current += timedelta(days=7)
     return output
+
+
+def fetch_json(url: str, timeout: int, user_agent: str) -> dict:
+    return json.loads(fetch_url(url, timeout=timeout, user_agent=user_agent).decode("utf-8", errors="replace"))
 
 
 def _url_has_pdf_query(url: str) -> bool:
@@ -131,7 +140,7 @@ def _host_matches_domain(host: str, domain: str) -> bool:
 
 
 def _normalize_link(link: str, page_url: str) -> str | None:
-    link = link.strip()
+    link = html_module.unescape(link.strip())
     if not link or link.startswith("#") or link.startswith("javascript:"):
         return None
     return urljoin(page_url, link)
@@ -151,6 +160,52 @@ def extract_links(html: str, page_url: str) -> list[str]:
             normalized.add(normalized_link)
 
     return sorted(normalized)
+
+
+def _get_included_record(document: dict, record_type: str) -> dict:
+    for item in document.get("included", []):
+        if item.get("type") == record_type:
+            return item
+    raise KeyError(f"Missing included record of type {record_type!r}")
+
+
+def load_class_website_data(site_path: str, timeout: int, user_agent: str) -> dict:
+    return fetch_json(f"{API_ROOT}/class_websites_by_slug/{site_path}", timeout=timeout, user_agent=user_agent)
+
+
+def build_card_stack_index(class_website_document: dict) -> dict[str, str]:
+    course = _get_included_record(class_website_document, "course")
+    calendar = course.get("attributes", {}).get("calendar", {})
+    date_items = calendar.get("dates", [])
+
+    card_stack_index: dict[str, str] = {}
+    for date_item in date_items:
+        date_id = date_item.get("id")
+        card_stack_id = date_item.get("attributes", {}).get("cardStackId")
+        if date_id and card_stack_id:
+            card_stack_index[date_id] = card_stack_id
+    return card_stack_index
+
+
+def extract_links_from_card_stack(card_stack_document: dict, page_url: str) -> list[str]:
+    data = card_stack_document.get("data", {})
+    cards = data.get("attributes", {}).get("cards", [])
+
+    links: list[str] = []
+    for card in cards:
+        attributes = card.get("attributes", {})
+        value = attributes.get("value")
+        if isinstance(value, str):
+            links.extend(extract_links(value, page_url))
+
+        for attachment in attributes.get("attachments", []) or []:
+            attachment_url = attachment.get("url")
+            if attachment_url:
+                normalized_link = _normalize_link(attachment_url, page_url)
+                if normalized_link:
+                    links.append(normalized_link)
+
+    return sorted(set(links))
 
 
 def safe_name_from_url(url: str, fallback: str) -> str:
@@ -200,6 +255,8 @@ def scrape(
         pdf_dir.mkdir(parents=True, exist_ok=True)
 
     week_dates = generate_week_dates(start_date, end_date)
+    class_website_document = load_class_website_data(site_path, timeout=timeout, user_agent=user_agent)
+    card_stack_index = build_card_stack_index(class_website_document)
 
     summary = {
         "site_path": site_path,
@@ -216,12 +273,15 @@ def scrape(
 
     for target_date in week_dates:
         page_url = f"{BASE_URL}/sites/{site_path}?date={target_date.isoformat()}&perspective={perspective}"
-        local_html = page_dir / f"{target_date.isoformat()}.html"
+        local_json = page_dir / f"{target_date.isoformat()}.json"
 
         try:
-            html = fetch_url(page_url, timeout=timeout, user_agent=user_agent).decode("utf-8", errors="replace")
-            local_html.write_text(html, encoding="utf-8")
-            page_links = extract_links(html, page_url)
+            card_stack_id = card_stack_index[target_date.isoformat()]
+            card_stack_document = fetch_json(
+                f"{API_ROOT}/card_stacks/{card_stack_id}", timeout=timeout, user_agent=user_agent
+            )
+            local_json.write_text(json.dumps(card_stack_document, indent=2, ensure_ascii=False), encoding="utf-8")
+            page_links = extract_links_from_card_stack(card_stack_document, page_url)
             classified_links = [
                 {"url": link, "type": resolve_link_type(link, timeout=timeout, user_agent=user_agent)}
                 for link in page_links
@@ -247,7 +307,7 @@ def scrape(
             {
                 "date": target_date.isoformat(),
                 "page_url": page_url,
-                "saved_html": str(local_html),
+                "saved_json": str(local_json),
                 "link_count": len(classified_links),
                 "error": page_error,
                 "links": classified_links,
