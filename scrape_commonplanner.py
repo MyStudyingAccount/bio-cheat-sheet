@@ -228,6 +228,24 @@ def reconstruct_html_from_card_stack(card_stack_document: dict, page_url: str) -
         # value is expected to be an HTML fragment already
         parts.append(value)
 
+        # Prefer explicit summary-like fields, otherwise extract a short snippet from the value
+        card_summary = (
+            attributes.get("summary")
+            or attributes.get("teaser")
+            or attributes.get("excerpt")
+            or attributes.get("description")
+            or attributes.get("subtitle")
+            or attributes.get("notes")
+        )
+        if not card_summary:
+            # strip tags to get a text snippet
+            text_snip = re.sub(r"<[^>]+>", "", value or "").strip()
+            if text_snip:
+                card_summary = text_snip.splitlines()[0][:300]
+
+        if card_summary:
+            parts.append(f"<p class=\"summary\">{html_module.escape(str(card_summary))}</p>")
+
         attachments = attributes.get("attachments") or []
         if attachments:
             parts.append("<ul>")

@@ -274,7 +274,8 @@ class ApiScrapeTests(unittest.TestCase):
                         "cards": [
                             {
                                 "attributes": {
-                                    "value": '<p><a href="https://www.youtube.com/watch?v=abc123">Lecture</a></p>',
+                                            "value": '<p><a href="https://www.youtube.com/watch?v=abc123">Lecture</a></p>',
+                                            "summary": "This is a brief summary line.",
                                     "attachments": [
                                         {"url": "https://cdn.filestackcontent.com/l0MyQIWSZ22902qfk8Tw", "title": "Handout.pdf"}
                                     ],
