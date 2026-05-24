@@ -71,6 +71,61 @@ def classify_link(url: str) -> str:
     return "external"
 
 
+def _response_looks_like_pdf(response) -> bool:
+    content_type = response.headers.get_content_type().lower()
+    if content_type == "application/pdf":
+        return True
+
+    content_disposition = response.headers.get("Content-Disposition", "").lower()
+    if ".pdf" in content_disposition:
+        return True
+
+    return False
+
+
+def _probe_pdf_url(url: str, timeout: int, user_agent: str) -> bool:
+    req = Request(
+        url,
+        headers={
+            "User-Agent": user_agent,
+            "Range": "bytes=0-15",
+        },
+    )
+    try:
+        res = urlopen(req, timeout=timeout)
+        # Support both real responses (context managers) and mocked responses
+        entered = None
+        try:
+            if hasattr(res, "__enter__"):
+                entered = res.__enter__()
+                response = entered
+            else:
+                response = res
+
+            if _response_looks_like_pdf(response):
+                return True
+            return response.read(4) == b"%PDF"
+        finally:
+            if entered is not None:
+                try:
+                    res.__exit__(None, None, None)
+                except Exception:
+                    pass
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def resolve_link_type(url: str, timeout: int, user_agent: str) -> str:
+    link_type = classify_link(url)
+    if link_type == "youtube" or link_type == "pdf":
+        return link_type
+
+    if _probe_pdf_url(url, timeout=timeout, user_agent=user_agent):
+        return "pdf"
+
+    return link_type
+
+
 def _host_matches_domain(host: str, domain: str) -> bool:
     return host == domain or host.endswith(f".{domain}")
 
@@ -167,7 +222,10 @@ def scrape(
             html = fetch_url(page_url, timeout=timeout, user_agent=user_agent).decode("utf-8", errors="replace")
             local_html.write_text(html, encoding="utf-8")
             page_links = extract_links(html, page_url)
-            classified_links = [{"url": link, "type": classify_link(link)} for link in page_links]
+            classified_links = [
+                {"url": link, "type": resolve_link_type(link, timeout=timeout, user_agent=user_agent)}
+                for link in page_links
+            ]
             page_error = ""
         except Exception as exc:  # noqa: BLE001
             classified_links = []

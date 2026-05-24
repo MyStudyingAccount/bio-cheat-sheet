@@ -1,7 +1,8 @@
 import unittest
 from datetime import date
+from unittest.mock import Mock, patch
 
-from scrape_commonplanner import classify_link, extract_links, generate_week_dates
+from scrape_commonplanner import classify_link, extract_links, generate_week_dates, resolve_link_type
 
 
 class WeekDateTests(unittest.TestCase):
@@ -43,6 +44,47 @@ class LinkExtractionTests(unittest.TestCase):
         self.assertEqual(classified["https://www.youtube.com/watch?v=abc123"], "youtube")
         self.assertEqual(classified["https://youtu.be/xyz"], "youtube")
         self.assertEqual(classified["https://example.com/homework"], "external")
+
+    def test_resolve_link_type_probes_non_suffix_pdf(self):
+        response = Mock()
+        response.headers.get_content_type.return_value = "application/pdf"
+        response.headers.get.return_value = ""
+        response.read.return_value = b""
+
+        with patch("scrape_commonplanner.urlopen", return_value=response):
+            self.assertEqual(
+                resolve_link_type("https://cdn.filestackcontent.com/l0MyQIWSZ22902qfk8Tw", 30, "test-agent"),
+                "pdf",
+            )
+
+    def test_resolve_link_type_keeps_html_links_external(self):
+        response = Mock()
+        response.headers.get_content_type.return_value = "text/html"
+        response.headers.get.return_value = ""
+        response.read.return_value = b"<htm"
+
+        with patch("scrape_commonplanner.urlopen", return_value=response):
+            self.assertEqual(
+                resolve_link_type("https://example.com/homework", 30, "test-agent"),
+                "external",
+            )
+
+    def test_resolve_link_type_handles_context_manager_response(self):
+        # Simulate urlopen returning a context manager (real response object)
+        mock_response = Mock()
+        mock_response.headers.get_content_type.return_value = "application/pdf"
+        mock_response.headers.get.return_value = ""
+        mock_response.read.return_value = b""
+
+        mock_ctx = Mock()
+        mock_ctx.__enter__.return_value = mock_response
+        mock_ctx.__exit__.return_value = None
+
+        with patch("scrape_commonplanner.urlopen", return_value=mock_ctx):
+            self.assertEqual(
+                resolve_link_type("https://cdn.filestackcontent.com/context-pdf", 30, "test-agent"),
+                "pdf",
+            )
 
     def test_classify_link_rejects_suffix_lookalikes(self):
         self.assertEqual(classify_link("https://notyoutube.com/watch?v=abc"), "external")
