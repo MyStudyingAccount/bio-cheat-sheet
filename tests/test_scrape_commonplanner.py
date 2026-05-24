@@ -1,6 +1,6 @@
 import unittest
 from datetime import date
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from scrape_commonplanner import classify_link, extract_links, generate_week_dates, resolve_link_type
 
@@ -76,7 +76,7 @@ class LinkExtractionTests(unittest.TestCase):
         mock_response.headers.get.return_value = ""
         mock_response.read.return_value = b""
 
-        mock_ctx = Mock()
+        mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = mock_response
         mock_ctx.__exit__.return_value = None
 
