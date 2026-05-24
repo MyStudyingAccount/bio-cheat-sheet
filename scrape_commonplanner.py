@@ -201,7 +201,7 @@ def scrape(
 
     if not skip_download_pdfs:
         for index, pdf_url in enumerate(sorted(pdf_links), start=1):
-            filename = f"{index:03d}_{safe_name_from_url(pdf_url, fallback=f'file_{index}') }"
+            filename = f"{index:03d}_{safe_name_from_url(pdf_url, fallback=f'file_{index}')}"
             target_file = pdf_dir / filename
             status = "ok"
             error_message = ""
